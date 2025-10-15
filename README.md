@@ -4,7 +4,7 @@ app contains vulnerabilites
   
 the mutation engine checks dont work perfectly, FIX  
 add attacks  
-only web_honeypot working, ssh yet to be made
+only web_honeypot working, ssh mutations yet to be made
 
 ### INSTRUCTIONS:
 
