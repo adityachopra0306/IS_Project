@@ -32,7 +32,7 @@ curl -s "http://localhost:{PORT}/greet?name=Bob"
 ```
 curl -s "http://localhost:{PORT}/search?query=%27+OR+%271%27=%271" -A "sqlmap/1.6"      # doesnt work yet
 
-curl -s "http://localhost:8421/greet?g_xy34=%3Cscript%3Ealert(1)%3C/script%3E" -A "BurpSuite"       # doesnt work yet
+curl -s "http://localhost:{PORT}/greet?g_xy34=%3Cscript%3Ealert(1)%3C/script%3E" -A "BurpSuite"       # doesnt work yet
 
 for i in {1..6}; do
   curl -s -X POST "http://localhost:$(docker port aass_web_honeypot | sed -n '1p' | awk -F: '{print $2}')/login" \
