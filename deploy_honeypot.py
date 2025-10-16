@@ -15,7 +15,7 @@ def init_mysql_schema(container_name="aass_mysql", root_password="password", ret
     Exec SQL inside the MySQL container to create vulndb.articles and insert sample rows.
     """
     client = docker.from_env()
-    # Wait for container to be ready by trying `mysql -e 'select 1'`
+    # Wait for container to be ready
     for attempt in range(retries):
         try:
             c = client.containers.get(container_name)
@@ -28,7 +28,7 @@ def init_mysql_schema(container_name="aass_mysql", root_password="password", ret
         try:
             rc = c.exec_run(cmd_check, stdout=True, stderr=True, demux=False)
             out = rc.output.decode() if hasattr(rc, "output") else str(rc)
-            # If rc exit code is 0, MySQL ready
+            # MySQL ready
             if isinstance(rc, docker.models.containers.ExecResult) and rc.exit_code == 0 or rc == 0:
                 print("[init_db] MySQL appears ready.")
                 break
@@ -40,7 +40,7 @@ def init_mysql_schema(container_name="aass_mysql", root_password="password", ret
         print("[init_db] Timeout waiting for MySQL. Aborting init.")
         return False
 
-    # SQL to create database, table and insert rows
+    
     sql = r"""
 CREATE DATABASE IF NOT EXISTS vulndb;
 USE vulndb;
@@ -57,7 +57,6 @@ ON DUPLICATE KEY UPDATE title=VALUES(title);
 """
 
     # run the SQL via mysql client inside the container
-    # use heredoc to avoid tricky quoting
     exec_cmd = f"bash -lc \"mysql -uroot -p'{root_password}' <<'SQL'\n{sql}\nSQL\n\""
     print("[init_db] Executing schema creation inside container...")
     res = c.exec_run(exec_cmd, stdout=True, stderr=True)
@@ -109,7 +108,7 @@ def deploy_mysql():
             },
         )
         print("[+] MySQL container started.")
-        time.sleep(15)  # give it a moment to initialize
+        time.sleep(15) 
         return c
 
 def deploy_web():
