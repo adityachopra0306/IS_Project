@@ -251,57 +251,84 @@ def handle_login_event(parsed):
 # HONEYPOT_GREET src=1.2.3.4 param=name name=... ua=...
 # HONEYPOT_LOGIN src=1.2.3.4 user='x' pass='y' ts=... ua=...
 
-SEARCH_RE = re.compile(r"HONEYPOT_SEARCH\s+src=(?P<src>\S+)\s+param=(?P<param>\S+)\s+query=(?P<query>.*?)\s+ua=(?P<ua>.*)$")
-GREET_RE = re.compile(r"HONEYPOT_GREET\s+src=(?P<src>\S+)\s+param=(?P<param>\S+)\s+name=(?P<name>.*?)\s+ua=(?P<ua>.*)$")
-LOGIN_RE = re.compile(r"HONEYPOT_LOGIN\s+src=(?P<src>\S+)\s+user=(?P<user>'.*?'|[^ ]+)\s+pass=(?P<pass>'.*?'|[^ ]+)\s+ts=(?P<ts>\S+)\s+ua=(?P<ua>.*)$")
+SEARCH_RE = re.compile(
+    r".*HONEYPOT_SEARCH\s+src=(?P<src>\S+)"
+    r"(?:\s+param=(?P<param>\S+))?"
+    r"\s+query=(?P<query>.*?)\s+ua=(?P<ua>.*)$"
+)
+
+GREET_RE = re.compile(
+    r".*HONEYPOT_GREET\s+src=(?P<src>\S+)"
+    r"(?:\s+param=(?P<param>\S+))?"
+    r"\s+name=(?P<name>.*?)\s+ua=(?P<ua>.*)$"
+)
+
+LOGIN_RE = re.compile(
+    r".*HONEYPOT_LOGIN\s+src=(?P<src>\S+)\s+user=(?P<user>'.*?'|[^ ]+)\s+pass=(?P<pass>'.*?'|[^ ]+)"
+    r"(?:\s+ts=(?P<ts>\S+))?\s+ua=(?P<ua>.*)$"
+)
 
 def parse_log_line(line):
     line = line.strip()
-    m = SEARCH_RE.search(line)
-    if m:
-        return ("search", m.groupdict())
-    m = GREET_RE.search(line)
-    if m:
-        return ("greet", m.groupdict())
-    m = LOGIN_RE.search(line)
-    if m:
-        d = m.groupdict()
-        # strip quotes from user/pass if present
-        d['user'] = d['user'].strip("'\"")
-        d['pass'] = d['pass'].strip("'\"")
-        return ("login", d)
+    for name, pattern in [("SEARCH", SEARCH_RE), ("GREET", GREET_RE), ("LOGIN", LOGIN_RE)]:
+        m = pattern.search(line)
+        if m:
+            if name == "LOGIN":
+                d = m.groupdict()
+                d["user"] = d["user"].strip("'\"")
+                d["pass"] = d["pass"].strip("'\"")
+                return ("login", d)
+            return (name.lower(), m.groupdict())
     return (None, None)
 
 # --- Main loop: tail logs and react ---
-def tail_and_detect():
-    print("[detector] Attaching to container logs:", CONTAINER_NAME)
-    try:
-        c = client.containers.get(CONTAINER_NAME)
-    except docker.errors.NotFound:
-        print("[detector] Container not found. Exiting.")
-        return
+import json, time, docker
 
-    # Use the logs API with follow=True
-    log_stream = c.logs(stream=True, follow=True, tail=0)
-    for raw in log_stream:
+def tail_and_detect():
+    print(f"[detector] Attaching to container logs: {CONTAINER_NAME}")
+    while True:
         try:
-            line = raw.decode('utf-8', errors='ignore').strip()
-        except Exception:
-            continue
-        if not line:
-            continue
-        kind, parsed = parse_log_line(line)
-        if kind == "search":
-            handle_search_event(parsed)
-        elif kind == "greet":
-            handle_greet_event(parsed)
-        elif kind == "login":
-            handle_login_event(parsed)
-        # Optionally: write every parsed event to file for dataset
-        if kind:
-            event = {"ts": now_ts(), "type": kind, "parsed": parsed, "raw": line}
-            with open("web_events.log", "a") as f:
-                f.write(json.dumps(event) + "\n")
+            c = client.containers.get(CONTAINER_NAME)
+            log_stream = c.logs(stream=True, follow=True, tail=0)
+            for raw in log_stream:
+                try:
+                    line = raw.decode("utf-8", errors="ignore").strip()
+                    if not line:
+                        continue
+                    kind, parsed = parse_log_line(line)
+                    print(parsed)
+                    if kind:
+                        try:
+                            if kind == "search":
+                                handle_search_event(parsed)
+                            elif kind == "greet":
+                                handle_greet_event(parsed)
+                            elif kind == "login":
+                                handle_login_event(parsed)
+                        except Exception as e:
+                            print(f"[detector] Handler error: {e}")
+
+                        event = {
+                            "ts": now_ts(),
+                            "type": kind,
+                            "parsed": parsed,
+                            "raw": line
+                        }
+                        with open("web_events.log", "a") as f:
+                            f.write(json.dumps(event) + "\n")
+
+                except Exception as e:
+                    print(f"[detector] Decode error: {e}")
+        except docker.errors.NotFound:
+            print("[detector] Container not found. Retrying in 5s.")
+            time.sleep(5)
+        except docker.errors.APIError as e:
+            print(f"[detector] Docker API error: {e}. Reconnecting in 5s.")
+            time.sleep(5)
+        except KeyboardInterrupt:
+            print("[detector] Exiting cleanly.")
+            break
+
 
 if __name__ == "__main__":
     import argparse
