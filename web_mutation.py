@@ -14,7 +14,6 @@ CONTAINER_NAME = "aass_web_honeypot"
 INTERNAL_PORT = 80
 MUTATION_LOG = "web_mutations.log"
 
-# --- Helpers ---
 def now_ts():
     return datetime.utcnow().isoformat() + "Z"
 
@@ -41,7 +40,6 @@ def log_mutation(event_obj):
     with open(MUTATION_LOG, "a") as f:
         f.write(json.dumps(event_obj) + "\n")
 
-# --- Container inspection & recreate (safe-ish) ---
 def inspect_container(container_name=CONTAINER_NAME):
     c = client.containers.get(container_name)
     attrs = c.attrs
@@ -91,7 +89,7 @@ def recreate_web_container(env_overrides=None, new_host_port=None):
     if env_overrides:
         env.update(env_overrides)
 
-    # determine host port to use (preserve old if not provided)
+    # determine host port
     internal_key = f"{INTERNAL_PORT}/tcp"
     current = info['ports_mapping'].get(internal_key)
     host_port = None
@@ -111,7 +109,7 @@ def recreate_web_container(env_overrides=None, new_host_port=None):
     except Exception as e:
         print("[mutate] remove error:", e)
 
-    # run new container
+    # run new cont
     run_kwargs = {
         'image': image,
         'environment': env,
@@ -126,7 +124,7 @@ def recreate_web_container(env_overrides=None, new_host_port=None):
     if entrypoint:
         run_kwargs['entrypoint'] = entrypoint
 
-    # filter out None values
+    # filter out None
     run_kwargs = {k:v for k,v in run_kwargs.items() if v is not None}
     # If there was a docker network that existed before, connect after create
     container = client.containers.run(**run_kwargs)
@@ -147,7 +145,6 @@ def recreate_web_container(env_overrides=None, new_host_port=None):
     log_mutation(event)
     return container
 
-# --- Mutation primitives ---
 def mutate_banner(suffix=None):
     suffix = suffix or rand_token(5)
     new_banner = f"AASS Web [{suffix}]"
@@ -155,7 +152,6 @@ def mutate_banner(suffix=None):
     print(f"[mutate] Banner changed to: {new_banner}")
 
 def mutate_params():
-    # new randomized param names
     new_search = "q_" + rand_token(6)
     new_greet = "g_" + rand_token(6)
     recreate_web_container(env_overrides={"SEARCH_PARAM": new_search, "GREET_PARAM": new_greet})
@@ -167,7 +163,6 @@ def mutate_port():
     print(f"[mutate] Host port shuffled to: {new_port}")
 
 def mutate_all():
-    # do all three (param rename + banner + shuffle port)
     new_search = "q_" + rand_token(6)
     new_greet = "g_" + rand_token(6)
     new_banner = f"AASS Web [{rand_token(4)}]"
@@ -176,7 +171,6 @@ def mutate_all():
                             new_host_port=new_port)
     print(f"[mutate] ALL -> search={new_search}, greet={new_greet}, banner={new_banner}, port={new_port}")
 
-# --- Simple detectors (log-based) ---
 SQL_PATTERNS = [
     re.compile(r"\bUNION\b", re.I),
     re.compile(r"\bSELECT\b", re.I),
@@ -188,7 +182,7 @@ SQL_PATTERNS = [
 XSS_PATTERNS = [
     re.compile(r"<script", re.I),
     re.compile(r"javascript:", re.I),
-    re.compile(r"on\w+\s*=" , re.I),  # onmouseover= etc
+    re.compile(r"on\w+\s*=" , re.I),
     re.compile(r"<img", re.I)
 ]
 
@@ -207,11 +201,9 @@ def check_xss_payload(s):
     return False
 
 def handle_search_event(parsed):
-    # parsed: dict with keys src, param, query, ua, raw_line
     q = parsed.get('query','')
     src = parsed.get('src','unknown')
     ua = parsed.get('ua','')
-    # check user-agent for sqlmap style
     if ua and ("sqlmap" in ua.lower() or "sqlmap" in q.lower()):
         print("[detect] SQLMap UA or signature detected -> mutate_all")
         mutate_all()
@@ -236,7 +228,6 @@ def handle_login_event(parsed):
     src = parsed.get('src','unknown')
     ts = time.time()
     LOGIN_FAILS[src].append(ts)
-    # keep only last 120 seconds
     window = 120
     LOGIN_FAILS[src] = [t for t in LOGIN_FAILS[src] if t > ts - window]
     if len(LOGIN_FAILS[src]) >= 5:
@@ -245,11 +236,12 @@ def handle_login_event(parsed):
         mutate_port()
         LOGIN_FAILS[src].clear()
 
-# --- Log parsing ---
-# Expected log formats (from honeypot_web/app.py):
-# HONEYPOT_SEARCH src=1.2.3.4 param=query query=... ua=...
-# HONEYPOT_GREET src=1.2.3.4 param=name name=... ua=...
-# HONEYPOT_LOGIN src=1.2.3.4 user='x' pass='y' ts=... ua=...
+'''
+Expected log formats (from honeypot_web/app.py):
+HONEYPOT_SEARCH src=1.2.3.4 param=query query=... ua=...
+HONEYPOT_GREET src=1.2.3.4 param=name name=... ua=...
+HONEYPOT_LOGIN src=1.2.3.4 user='x' pass='y' ts=... ua=...
+'''
 
 SEARCH_RE = re.compile(
     r".*HONEYPOT_SEARCH\s+src=(?P<src>\S+)"
@@ -280,9 +272,6 @@ def parse_log_line(line):
                 return ("login", d)
             return (name.lower(), m.groupdict())
     return (None, None)
-
-# --- Main loop: tail logs and react ---
-import json, time, docker
 
 def tail_and_detect():
     print(f"[detector] Attaching to container logs: {CONTAINER_NAME}")
