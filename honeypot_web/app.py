@@ -39,7 +39,7 @@ def close_db(e=None):
 def index():
     return render_template_string(INDEX_HTML, banner=BANNER)
 
-# Vulnerable to SQL injection: uses string formatting directly
+# SQL INJECTION
 @app.route('/search')
 def search():
     q = request.args.get('query', '')
@@ -53,17 +53,17 @@ def search():
         rows = cur.fetchall()
     return {"results": rows}
 
-# Reflected XSS (renders input unsanitized)
+# REFLECTED XSS
 @app.route('/greet')
 def greet():
     name = request.args.get('name', 'friend')
     src = request.remote_addr
     app.logger.info(f"HONEYPOT_GREET src={src} name={name} ua={request.headers.get('User-Agent')}")
-    # INTENTIONAL: reflect directly (vulnerable)
+    # reflect directly (vulnerable)
     html = f"<h2>Hello, {name}!</h2>"
     return html
 
-# Fake login that just logs creds (useful for brute force capture)
+# Fake login (for brute force)
 @app.route('/login', methods=['POST'])
 def login():
     username = request.form.get('username','')
@@ -71,7 +71,7 @@ def login():
     src = request.remote_addr
     ts = __import__('datetime').datetime.utcnow().isoformat()+"Z"
     app.logger.info(f"HONEYPOT_LOGIN src={src} user={username!r} pass={password!r} ts={ts} ua={request.headers.get('User-Agent')}")
-    # Always fail to encourage retries (or you can sometimes succeed to capture post-exploit behavior)
+    # Always fail
     return "Login failed", 401
 
 if __name__ == '__main__':
